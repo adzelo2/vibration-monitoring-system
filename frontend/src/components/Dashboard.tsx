@@ -1,9 +1,9 @@
 import { Activity } from 'lucide-react';
 import './Dashboard.css';
-import ControlPanel from './ControlPanel';
-import SensorStatus from './SensorStatus';
-import SessionManager from './SessionManager';
-import RealTimeChart from './RealTimeChart';
+import ControlPanel from './ControlPanel.tsx';
+import SensorStatus from './SensorStatus.tsx';
+import SessionManager from './SessionManager.tsx';
+import RealTimeChart from './RealTimeChart.tsx';
 import { useEffect, useState, useRef } from 'react';
 import { getSystemStatus, createWebSocketConnection } from '../services/api';
 
@@ -14,9 +14,9 @@ export default function Dashboard() {
     active_session: null
   });
   const [wsConnected, setWsConnected] = useState(false);
-  const [chartData, setChartData] = useState<{timestamp: number, value: number}[]>([]);
+  const [chartData, setChartData] = useState<{ timestamp: number, value: number }[]>([]);
   const MAX_DATA_POINTS = 100;
-  
+
   const chartDataRef = useRef(chartData);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function Dashboard() {
         console.error("Failed to fetch status", e);
       }
     };
-    
+
     fetchStatus();
     const statusInterval = setInterval(fetchStatus, 5000);
 
@@ -82,9 +82,9 @@ export default function Dashboard() {
         <div className="dashboard-grid">
           <aside className="sidebar">
             <ControlPanel esp32Connected={systemStatus.esp32_connected} />
-            <SessionManager 
-              activeSession={systemStatus.active_session} 
-              onSessionChange={(status) => setSystemStatus({...systemStatus, ...status})}
+            <SessionManager
+              activeSession={systemStatus.active_session}
+              onSessionChange={(status) => setSystemStatus({ ...systemStatus, ...status })}
             />
           </aside>
           <section className="content-area">
