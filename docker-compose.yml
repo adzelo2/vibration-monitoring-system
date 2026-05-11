@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./recordings:/app/recordings
+    environment:
+      - ESP32_PORT=${ESP32_PORT:-COM7}
+    # Note: Accessing serial ports (COMx) from within Docker on Windows/Mac can be problematic.
+    # If the backend cannot connect to the ESP32, run the backend natively using Python.
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0" # Example for Linux
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
