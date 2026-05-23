@@ -50,7 +50,6 @@ export default function RealTimeChart({ data }: RealTimeChartProps) {
               gridcolor: 'rgba(255,255,255,0.05)',
               zeroline: true,
               zerolinecolor: 'rgba(255,255,255,0.1)',
-              range: [-2, 2], // Fix range to simulate sensor limits
             },
             hovermode: 'closest'
           }}

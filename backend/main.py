@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,14 +8,13 @@ from typing import List
 
 from serial_manager import SerialManager
 from session_manager import SessionManager
-from mock_sensor import MockSensorStream
 
 app = FastAPI(title="Microvibration Monitoring Backend")
 
 # Allow CORS for the React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the exact origin
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,7 +23,6 @@ app.add_middleware(
 # Managers
 serial_manager = SerialManager()
 session_manager = SessionManager()
-mock_sensor = MockSensorStream()
 
 # Active websocket connections
 class ConnectionManager:
@@ -50,54 +49,87 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def startup_event():
     serial_manager.connect()
-    # Start the mock data generation loop in background
-    asyncio.create_task(mock_sensor_loop())
+    # Start the real data forwarding loop in background
+    asyncio.create_task(serial_data_loop())
 
 @app.on_event("shutdown")
 async def shutdown_event():
     serial_manager.disconnect()
 
-async def mock_sensor_loop():
-    """Background task to broadcast mock sensor data and save to session if active."""
+import time
+
+last_broadcast_time = 0
+BROADCAST_INTERVAL = 1.0 / 30.0  # 30 Hz
+
+async def serial_data_loop():
+    """Background task to broadcast real sensor data and save to session."""
+    global last_broadcast_time
+    batch = []
+
     while True:
-        data_json = mock_sensor.get_next_reading()
-        await manager.broadcast(data_json)
-        
-        # If a session is active, record the data
-        if session_manager.active_session_id:
-            import json
-            data = json.loads(data_json)
-            session_manager.append_data(data["timestamp"], data["value"])
-            
-        await asyncio.sleep(0.05)  # 20 Hz mock rate
+        items = []
+        while not serial_manager.data_queue.empty():
+            items.append(serial_manager.data_queue.get_nowait())
+
+        for data in items:
+            # Always save all raw data to session
+            if session_manager.active_session_id:
+                session_manager.append_data(data["timestamp"], data["value"])
+            batch.append(data)
+
+        # Send 1 averaged point to frontend at 30 Hz
+        current_time = time.time()
+        if current_time - last_broadcast_time >= BROADCAST_INTERVAL and batch:
+            avg_val = sum(p["value"] for p in batch) / len(batch)
+            point = {"timestamp": batch[-1]["timestamp"], "value": avg_val}
+            await manager.broadcast(json.dumps(point))
+            batch = []
+            last_broadcast_time = current_time
+
+        await asyncio.sleep(0.005)
 
 # --- REST API Endpoints ---
 
 @app.get("/api/status")
 def get_status():
     """Get the connection status of the ESP32."""
-    print(f"DEBUG /api/status: is_connected={serial_manager.is_connected}")
     return {
         "status": "online",
         "esp32_connected": serial_manager.is_connected,
         "active_session": session_manager.active_session_id
     }
 
-@app.post("/api/gpio/on")
-def gpio_on():
-    """Send ON command to ESP32 to turn on GPIO 14."""
-    success = serial_manager.send_command("ON")
-    if success:
-        return {"message": "Command 'ON' sent successfully."}
-    return {"error": "Failed to send command. Is ESP32 connected?"}, 500
+class RateRequest(BaseModel):
+    rate: str
 
-@app.post("/api/gpio/off")
-def gpio_off():
-    """Send OFF command to ESP32 to turn off GPIO 14."""
-    success = serial_manager.send_command("OFF")
+@app.post("/api/sampling/start")
+def sampling_start():
+    """Send START command to ESP32."""
+    success = serial_manager.send_command("START")
     if success:
-        return {"message": "Command 'OFF' sent successfully."}
-    return {"error": "Failed to send command. Is ESP32 connected?"}, 500
+        return {"message": "Command 'START' sent successfully."}
+    return {"error": "Failed to send command."}, 500
+
+@app.post("/api/sampling/stop")
+def sampling_stop():
+    """Send STOP command to ESP32."""
+    success = serial_manager.send_command("STOP")
+    if success:
+        return {"message": "Command 'STOP' sent successfully."}
+    return {"error": "Failed to send command."}, 500
+
+@app.post("/api/sampling/rate")
+def sampling_rate(req: RateRequest):
+    """Send RATE command to ESP32."""
+    # Ensure rate is 15K or 30K
+    valid_rates = ["15K", "30K"]
+    if req.rate not in valid_rates:
+        return {"error": "Invalid rate"}, 400
+        
+    success = serial_manager.send_command(f"RATE:{req.rate}")
+    if success:
+        return {"message": f"Command 'RATE:{req.rate}' sent successfully."}
+    return {"error": "Failed to send command."}, 500
 
 @app.post("/api/session/start")
 def start_session():
@@ -129,7 +161,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection open, client might send pings
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)

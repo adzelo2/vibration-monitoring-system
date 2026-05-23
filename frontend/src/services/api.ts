@@ -12,13 +12,18 @@ export const getSystemStatus = async () => {
   return response.data;
 };
 
-export const turnGpioOn = async () => {
-  const response = await api.post('/gpio/on');
+export const startSampling = async () => {
+  const response = await api.post('/sampling/start');
   return response.data;
 };
 
-export const turnGpioOff = async () => {
-  const response = await api.post('/gpio/off');
+export const stopSampling = async () => {
+  const response = await api.post('/sampling/stop');
+  return response.data;
+};
+
+export const setSamplingRate = async (rate: string) => {
+  const response = await api.post('/sampling/rate', { rate });
   return response.data;
 };
 

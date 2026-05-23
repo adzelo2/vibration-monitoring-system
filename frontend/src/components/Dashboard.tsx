@@ -15,7 +15,7 @@ export default function Dashboard() {
   });
   const [wsConnected, setWsConnected] = useState(false);
   const [chartData, setChartData] = useState<{ timestamp: number, value: number }[]>([]);
-  const MAX_DATA_POINTS = 100;
+  const MAX_DATA_POINTS = 300;
 
   const chartDataRef = useRef(chartData);
 

@@ -1,5 +1,6 @@
-import { Cpu, Power, ZapOff } from 'lucide-react';
-import { turnGpioOn, turnGpioOff } from '../services/api';
+import { Cpu, Play, Square, Settings2 } from 'lucide-react';
+import { startSampling, stopSampling, setSamplingRate } from '../services/api';
+import { useState } from 'react';
 import './ControlPanel.css';
 
 interface ControlPanelProps {
@@ -7,19 +8,34 @@ interface ControlPanelProps {
 }
 
 export default function ControlPanel({ esp32Connected }: ControlPanelProps) {
-  const handleOn = async () => {
+  const [isSampling, setIsSampling] = useState(false);
+  const [samplingRate, setRate] = useState('15K');
+
+  const handleStart = async () => {
     try {
-      await turnGpioOn();
+      await startSampling();
+      setIsSampling(true);
     } catch (e) {
-      console.error("Failed to turn ON", e);
+      console.error("Failed to start sampling", e);
     }
   };
 
-  const handleOff = async () => {
+  const handleStop = async () => {
     try {
-      await turnGpioOff();
+      await stopSampling();
+      setIsSampling(false);
     } catch (e) {
-      console.error("Failed to turn OFF", e);
+      console.error("Failed to stop sampling", e);
+    }
+  };
+
+  const handleRateChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const rate = e.target.value;
+    setRate(rate);
+    try {
+      await setSamplingRate(rate);
+    } catch (err) {
+      console.error("Failed to set rate", err);
     }
   };
 
@@ -30,27 +46,42 @@ export default function ControlPanel({ esp32Connected }: ControlPanelProps) {
         <h2>Hardware Control</h2>
       </div>
       
-      <p className="panel-desc">Test the ESP32 connection by toggling GPIO 14.</p>
+      <p className="panel-desc">Control ESP32 ADS1256 sampling and configure settings.</p>
       
-      <div className="button-group">
+      <div className="control-group">
+        <label className="control-label">
+          <Settings2 size={14} /> Sampling Rate
+        </label>
+        <select 
+          className="rate-select"
+          value={samplingRate} 
+          onChange={handleRateChange}
+          disabled={!esp32Connected || isSampling}
+        >
+          <option value="15K">15k SPS</option>
+          <option value="30K">30k SPS</option>
+        </select>
+      </div>
+
+      <div className="button-group" style={{ marginTop: '1rem' }}>
         <button 
           className="btn btn-success" 
-          onClick={handleOn}
-          disabled={!esp32Connected}
+          onClick={handleStart}
+          disabled={!esp32Connected || isSampling}
         >
-          <Power size={16} /> GPIO 14 ON
+          <Play size={16} /> Start
         </button>
         <button 
           className="btn btn-danger" 
-          onClick={handleOff}
-          disabled={!esp32Connected}
+          onClick={handleStop}
+          disabled={!esp32Connected || !isSampling}
         >
-          <ZapOff size={16} /> GPIO 14 OFF
+          <Square size={16} /> Stop
         </button>
       </div>
 
       {!esp32Connected && (
-        <div className="warning-text">ESP32 is not connected. Commands will be mocked.</div>
+        <div className="warning-text">ESP32 is not connected.</div>
       )}
     </div>
   );

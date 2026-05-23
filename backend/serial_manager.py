@@ -2,6 +2,7 @@ import serial
 import time
 import os
 import threading
+import queue
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,6 +16,7 @@ class SerialManager:
         self.is_connected = False
         self.read_thread = None
         self.running = False
+        self.data_queue = queue.Queue()
 
     def connect(self):
         """Establish serial connection."""
@@ -24,7 +26,7 @@ class SerialManager:
             self.running = True
             print(f"Connected to ESP32 on {self.port}")
             
-            # Start background thread for reading responses (if needed later)
+            # Start background thread for reading responses
             self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
             self.read_thread.start()
             
@@ -44,10 +46,9 @@ class SerialManager:
         """Send a string command to the ESP32."""
         if not self.is_connected or not self.serial_conn:
             print(f"Mock send command '{command}' (Serial not connected)")
-            return True # Return true even if mocked for UI testing
+            return True
 
         try:
-            # Send command with newline character which Micropython print/sys.stdin reads
             formatted_cmd = f"{command}\n".encode('utf-8')
             self.serial_conn.write(formatted_cmd)
             self.serial_conn.flush()
@@ -62,12 +63,17 @@ class SerialManager:
         """Background loop to read responses from ESP32."""
         while self.running and self.serial_conn and self.serial_conn.is_open:
             try:
-                if self.serial_conn.in_waiting > 0:
-                    line = self.serial_conn.readline().decode('utf-8').strip()
+                while self.serial_conn.in_waiting > 0:
+                    line = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
                     if line:
-                        print(f"ESP32: {line}")
+                        try:
+                            value = float(line)
+                            timestamp = time.time()
+                            self.data_queue.put({"timestamp": timestamp, "value": value})
+                        except ValueError:
+                            print(f"ESP32: {line}")
             except Exception as e:
                 print(f"Error reading from serial: {e}")
                 self.is_connected = False
                 break
-            time.sleep(0.01)
+            time.sleep(0.001)
