@@ -1,6 +1,7 @@
 import os
 import asyncio
 import json
+import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -56,34 +57,41 @@ async def startup_event():
 async def shutdown_event():
     serial_manager.disconnect()
 
-import time
-
 last_broadcast_time = 0
 BROADCAST_INTERVAL = 1.0 / 30.0  # 30 Hz
 
 async def serial_data_loop():
-    """Background task to broadcast real sensor data and save to session."""
+    """Background task: consume batched sensor data, record to session, broadcast at 30Hz."""
     global last_broadcast_time
-    batch = []
+    accumulator = []  # Values accumulated for the current broadcast window
 
     while True:
-        items = []
+        # Drain all batches from the queue
+        batches_consumed = 0
         while not serial_manager.data_queue.empty():
-            items.append(serial_manager.data_queue.get_nowait())
+            try:
+                batch = serial_manager.data_queue.get_nowait()
+            except Exception:
+                break
 
-        for data in items:
+            values = batch["values"]
+            base_ts = batch["timestamp"]
+
             # Always save all raw data to session
             if session_manager.active_session_id:
-                session_manager.append_data(data["timestamp"], data["value"])
-            batch.append(data)
+                session_manager.append_batch(base_ts, values)
 
-        # Send 1 averaged point to frontend at 30 Hz
+            # Accumulate for frontend averaging
+            accumulator.extend(values)
+            batches_consumed += 1
+
+        # Broadcast one averaged point to frontend at 30 Hz
         current_time = time.time()
-        if current_time - last_broadcast_time >= BROADCAST_INTERVAL and batch:
-            avg_val = sum(p["value"] for p in batch) / len(batch)
-            point = {"timestamp": batch[-1]["timestamp"], "value": avg_val}
+        if current_time - last_broadcast_time >= BROADCAST_INTERVAL and accumulator:
+            avg_val = sum(accumulator) / len(accumulator)
+            point = {"timestamp": current_time, "value": avg_val}
             await manager.broadcast(json.dumps(point))
-            batch = []
+            accumulator = []
             last_broadcast_time = current_time
 
         await asyncio.sleep(0.005)
@@ -103,30 +111,31 @@ class RateRequest(BaseModel):
     rate: str
 
 @app.post("/api/sampling/start")
-def sampling_start():
+async def sampling_start():
     """Send START command to ESP32."""
-    success = serial_manager.send_command("START")
+    success = await serial_manager.send_command_async("1")
     if success:
         return {"message": "Command 'START' sent successfully."}
     return {"error": "Failed to send command."}, 500
 
 @app.post("/api/sampling/stop")
-def sampling_stop():
+async def sampling_stop():
     """Send STOP command to ESP32."""
-    success = serial_manager.send_command("STOP")
+    success = await serial_manager.send_command_async("0")
     if success:
         return {"message": "Command 'STOP' sent successfully."}
     return {"error": "Failed to send command."}, 500
 
 @app.post("/api/sampling/rate")
-def sampling_rate(req: RateRequest):
+async def sampling_rate(req: RateRequest):
     """Send RATE command to ESP32."""
     # Ensure rate is 15K or 30K
     valid_rates = ["15K", "30K"]
     if req.rate not in valid_rates:
         return {"error": "Invalid rate"}, 400
         
-    success = serial_manager.send_command(f"RATE:{req.rate}")
+    cmd = "15" if req.rate == "15K" else "30"
+    success = await serial_manager.send_command_async(cmd)
     if success:
         return {"message": f"Command 'RATE:{req.rate}' sent successfully."}
     return {"error": "Failed to send command."}, 500
